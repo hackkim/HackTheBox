@@ -1,226 +1,213 @@
-> 📚 This document summarizes core HTTP/HTTPS concepts based on personal studies at Hack The Box Academy.
+# 📚 HTTP and HTTPS Fundamentals
 
-
-# HTTP and HTTPS Fundamentals
-
----
-
-## 🌐 What is HTTP?
-
-- **HTTP** (HyperText Transfer Protocol) is an application-layer protocol used to access resources over the World Wide Web (WWW).
-- It enables communication between **clients** (e.g., browsers) and **servers**.
-- Default port: **80** (can be changed based on server configuration).
-- To visit a site like `www.hackthebox.com`, users input a Fully Qualified Domain Name (FQDN) or URL.
+> This document summarizes core HTTP/HTTPS concepts based on personal studies at Hack The Box Academy.
 
 ---
 
-## 🛣️ URL Structure
+## 🌐 HyperText Transfer Protocol (HTTP)
 
-A URL consists of several components:
+Today, most applications constantly interact with the internet. HTTP is an **application-layer protocol** used to access World Wide Web (WWW) resources.
 
+- **Hypertext**: Text containing links to other resources
+- **HTTP Communication**:
+  - Client sends request
+  - Server processes and responds
+- **Default Port**: `80`
+- We use Fully Qualified Domain Names (FQDN) and URLs (Uniform Resource Locator) to reach websites.
+
+### 🧩 URL Structure
 | Component | Example | Description |
-|:---|:---|:---|
-| Scheme | `http://` or `https://` | Specifies the protocol |
+|:--|:--|:--|
+| Scheme | `http://`, `https://` | Protocol used |
 | User Info | `admin:password@` | Optional credentials |
-| Host | `inlanefreight.com` | Domain or IP address |
-| Port | `:80` | Communication port (default 80 for HTTP, 443 for HTTPS) |
-| Path | `/dashboard.php` | Resource location |
-| Query String | `?login=true` | Additional parameters |
-| Fragment | `#status` | Navigation to a section within the page |
+| Host | `inlanefreight.com` | Resource location |
+| Port | `:80` | Network port (default `80` or `443`) |
+| Path | `/dashboard.php` | Specific resource path |
+| Query String | `?login=true` | Parameters and values |
+| Fragment | `#status` | Section inside resource |
 
-Only the **Scheme** and **Host** are mandatory for making a valid request.
-
----
-
-## 🔄 HTTP Communication Flow
-
-1. Browser resolves the domain via DNS (checks `/etc/hosts` first).
-2. Browser sends an HTTP `GET` request to the server.
-3. Server processes the request and responds with an index file (e.g., `index.html`).
-4. Browser renders the HTML content for the user.
+Only `Scheme` and `Host` are mandatory.
 
 ---
 
-## 🛠️ Introduction to cURL
+## 🔄 HTTP Flow
 
-- **cURL** is a command-line tool to send requests over HTTP and other protocols.
-- Unlike browsers, cURL outputs raw HTML without rendering.
+When you enter a URL:
+1. Browser queries DNS → gets IP
+2. Sends HTTP GET request to server
+3. Server returns response (e.g., `index.html`)
 
-Example:
+**Key Status Code**: `200 OK`
+
+> ℹ️ Browsers first check `/etc/hosts` file before DNS lookup.
+
+---
+
+## ⚡ Using cURL
+
+- Send requests from command line
+- Supports multiple protocols (HTTP, HTTPS, FTP, etc.)
+
 ```bash
 curl inlanefreight.com
-```
-
-Download a file:
-```bash
 curl -O inlanefreight.com/index.html
-```
-
-Silent mode:
-```bash
 curl -s -O inlanefreight.com/index.html
+curl -h  # View help
 ```
 
-Display cURL options:
+**Silent mode** with `-s`, **Save output** with `-O` or `-o filename`.
+
+---
+
+## 🔐 Hypertext Transfer Protocol Secure (HTTPS)
+
+- Solves HTTP security issues by encrypting traffic
+- Prevents **Man-in-the-Middle (MITM)** attacks
+- Default Port: `443`
+- SSL/TLS handshake establishes secure channel
+
+### 🚨 HTTPS Downgrade Attack
+Modern browsers protect against downgrade attacks from HTTPS → HTTP.
+
+---
+
+## 🌍 HTTP Requests and Responses
+
+- **Request**: Sent by client
+- **Response**: Sent by server
+
+### 🛠️ Request Structure
+```text
+GET /users/login.html HTTP/1.1
+Host: inlanefreight.com
+User-Agent: curl/7.65.3
+Accept: */*
+```
+
+### 🛠️ Response Structure
+```text
+HTTP/1.1 200 OK
+Content-Type: text/html
+Date: ...
+<html>...</html>
+```
+
+Use `curl -v` to view full request/response exchange.
+
+---
+
+## 📑 HTTP Headers
+
+| Header Type | Example | Purpose |
+|:--|:--|:--|
+| General | `Date: ...`, `Connection: close` | Message metadata |
+| Entity | `Content-Type: text/html` | About content |
+| Request | `User-Agent: curl/7.77.0` | Client info |
+| Response | `Server: Apache/2.4.14` | Server info |
+| Security | `Strict-Transport-Security: ...` | Enforce HTTPS |
+
+Use `curl -I` to view only response headers.
+
+---
+
+## 🔄 HTTP Methods
+
+| Method | Purpose |
+|:--|:--|
+| GET | Retrieve resources |
+| POST | Submit data to server |
+| PUT | Replace resource |
+| PATCH | Partially modify resource |
+| DELETE | Remove resource |
+| HEAD | Retrieve headers only |
+| OPTIONS | Supported methods info |
+
+Use browser DevTools or cURL to observe methods.
+
+---
+
+## ⚙️ HTTP Response Codes
+
+| Code | Meaning |
+|:--|:--|
+| 1xx | Informational |
+| 2xx | Success |
+| 3xx | Redirection |
+| 4xx | Client Error |
+| 5xx | Server Error |
+
+Example:
+- `200 OK`: Successful request
+- `404 Not Found`: Resource missing
+- `500 Internal Server Error`: Server crashed
+
+---
+
+## 🛡️ HTTP Basic Authentication
+
+Protects resources with simple username/password:
 ```bash
-curl -h
+curl -u admin:admin http://target_ip:port/
+```
+
+Authorization header:
+```
+Authorization: Basic base64(user:pass)
 ```
 
 ---
 
-## 🔒 Why HTTPS Matters
+## 🗂️ Working with GET and POST
 
-- **HTTP** transmits data as plain text (vulnerable to MITM attacks).
-- **HTTPS** encrypts communication, protecting sensitive information like login credentials.
+- **GET**: Parameters in URL
+- **POST**: Parameters in request body
 
-Browser indicator for HTTPS:
-- URL starts with `https://`
-- Lock icon appears in browser address bar
-
----
-
-## 🛡️ How HTTPS Works
-
-1. Client connects to port 80.
-2. Server redirects to port 443 (`301 Moved Permanently`).
-3. SSL/TLS handshake occurs (certificate exchange and validation).
-4. Encrypted communication begins.
-5. Downgrade attacks are blocked by modern browsers and servers.
-
-cURL connecting to an invalid certificate:
+Example POST with cURL:
 ```bash
-curl https://inlanefreight.com
+curl -X POST -d 'username=admin&password=admin' http://target_ip:port/
 ```
 
-Skip certificate verification:
+---
+
+## 🛠️ Cookies in Authentication
+
+Store session ID in cookies after login:
 ```bash
-curl -k https://inlanefreight.com
+curl -b 'PHPSESSID=sessionid' http://target_ip:port/
 ```
+
+Can also be injected manually via browser DevTools.
 
 ---
 
-## 📄 HTTP Request and Response
+## 📦 JSON Data Handling
 
-### HTTP Request Format
-
-- Method: e.g., `GET`
-- Path: e.g., `/users/login.html`
-- Version: e.g., `HTTP/1.1`
-- Headers: Host, User-Agent, Accept, etc.
-- Body: Optional data payload (e.g., POST request)
-
-### HTTP Response Format
-
-- Status Line: Version + Response Code (e.g., `HTTP/1.1 200 OK`)
-- Headers: Server, Set-Cookie, Content-Type, etc.
-- Body: HTML, JSON, images, etc.
-
-Verbose cURL example:
+- `Content-Type: application/json`
+- Used for APIs
+- Send JSON with POST:
 ```bash
-curl -v inlanefreight.com
+curl -X POST -H "Content-Type: application/json" -d '{"search":"london"}' http://target_ip:port/search.php
 ```
 
 ---
 
-## 🧰 Browser Developer Tools
+## 🧹 CRUD API (Create, Read, Update, Delete)
 
-- Open DevTools with `F12` or `Ctrl+Shift+I`.
-- **Network Tab** shows all web requests and responses.
-- Inspect HTTP methods, status codes, headers, and response bodies.
+**Typical API interactions:**
 
----
+| Operation | HTTP Method | Action |
+|:--|:--|:--|
+| Create | POST | Add entry |
+| Read | GET | Retrieve entry |
+| Update | PUT | Modify entry |
+| Delete | DELETE | Remove entry |
 
-## 📑 HTTP Headers Overview
-
-| Type | Examples | Purpose |
-|:---|:---|:---|
-| General Headers | `Date`, `Connection` | Describe message metadata |
-| Entity Headers | `Content-Type`, `Content-Length` | Describe the resource content |
-| Request Headers | `Host`, `User-Agent`, `Accept`, `Authorization` | Provide client-specific data |
-| Response Headers | `Server`, `Set-Cookie`, `WWW-Authenticate` | Server context info |
-| Security Headers | `Content-Security-Policy`, `Strict-Transport-Security`, `Referrer-Policy` | Enforce browser security policies |
-
----
-
-## 🚀 Key Takeaways
-
-- HTTP is unencrypted; HTTPS provides secure communication.
-- Understanding the structure of HTTP requests/responses is vital for web security.
-- Tools like cURL and DevTools are essential for penetration testing and debugging.
-- Proper use of HTTP headers enhances communication security and performance.
-
----
-
-> 🧠 This study note is based on practical exercises from Hack The Box Academy, rewritten for personal learning documentation.
-
-
-
-# HTTP Methods and Status Codes
-
----
-
-## 📩 HTTP Methods
-
-HTTP supports multiple methods that define actions to be performed on resources. These methods inform the server about the intended action for a given request.
-
-Here are the commonly used HTTP methods:
-
-| Method | Description |
-|:---|:---|:---|
-| GET | Requests a specific resource. Can send additional data via query strings (`?param=value`). |
-| POST | Sends data to the server (e.g., form submissions, file uploads). Data is sent in the request body. |
-| HEAD | Requests headers for a resource, without the body. Useful for checking metadata like file size before downloading. |
-| PUT | Uploads or creates a new resource on the server. |
-| DELETE | Deletes an existing resource. Poor configuration can lead to dangerous data removal. |
-| OPTIONS | Returns supported HTTP methods for the server or resource. |
-| PATCH | Partially modifies a resource. |
-
-> Note: Most web applications primarily use **GET** and **POST**. APIs often use **PUT** and **DELETE** for modifying and deleting data.
-
----
-
-## 📜 HTTP Status Codes
-
-HTTP status codes indicate the outcome of the request and are grouped into five categories:
-
-| Type | Description |
-|:---|:---|:---|
-| 1xx | Informational responses (Request received, continuing process). |
-| 2xx | Success (The request was successfully received, understood, and accepted). |
-| 3xx | Redirection (Further action needs to be taken). |
-| 4xx | Client Errors (The request contains bad syntax or cannot be fulfilled). |
-| 5xx | Server Errors (The server failed to fulfill a valid request). |
-
-### Common Status Codes
-
-| Code | Meaning | Description |
-|:---|:---|:---|
-| 200 | OK | Request succeeded; resource is returned. |
-| 302 | Found | Temporary redirection to another URL. |
-| 400 | Bad Request | Malformed request syntax. |
-| 403 | Forbidden | Server understood request but refuses to authorize it. |
-| 404 | Not Found | Requested resource does not exist. |
-| 500 | Internal Server Error | Server encountered an error processing the request. |
-
----
-
-## 🔍 Example Requests
-
-GET request with cURL:
+Example update:
 ```bash
-curl http://example.com
-```
-
-POST request with cURL:
-```bash
-curl -X POST -d 'username=admin&password=admin' http://example.com/login
-```
-
-Handling cookies with cURL:
-```bash
-curl -b 'SESSIONID=abcdef123456' http://example.com/profile
+curl -X PUT -H "Content-Type: application/json" -d '{"city_name":"NewCity"}' http://target_ip:port/api.php/city/london
 ```
 
 ---
 
-> 🧠 This study note is based on practical exercises from Hack The Box Academy, restructured for personal learning documentation.
+# 🚀 End of HTTP/HTTPS Fundamentals Summary
+
