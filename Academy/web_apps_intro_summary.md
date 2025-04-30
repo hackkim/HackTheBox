@@ -1,149 +1,165 @@
-# 🌐 Introduction and Structure of Web Applications
+# 🛡️ Using Web Proxies for Web Application Penetration Testing
+
+## 📌 Introduction
+
+Modern web and mobile applications rely on constant communication with back-end servers to exchange and process data. This makes **Web Proxies** an essential tool for penetration testers, as they allow interception, modification, and analysis of HTTP requests and responses.
 
 ---
 
-## 📌 What is a Web Application?
+## 🔍 What is a Web Proxy?
 
-A **Web Application** is an interactive application that runs in a web browser. It typically follows a client-server architecture, comprising a frontend (user interface) and a backend (server and databases).
+A **Web Proxy** is a man-in-the-middle (MITM) tool that intercepts traffic between a browser or mobile app and the server. Unlike general network sniffers like Wireshark, web proxies focus on HTTP/HTTPS (ports 80/443) and allow detailed inspection and modification of web traffic.
 
-Examples include:
-
-- 📧 Gmail (Online email service)
-- 🛒 Amazon (Online marketplace)
-- 📄 Google Docs (Online document editing)
-
----
-
-## 🖥️ Web Applications vs Websites
-
-| Aspect           | Websites (Web 1.0)              | Web Applications (Web 2.0)           |
-|------------------|---------------------------------|--------------------------------------|
-| Form             | Provides static content         | Dynamic and interactive              |
-| Real-time        | Not possible                    | Possible                             |
-| Examples         | Blogs, corporate sites          | Online marketplaces, social media    |
+**Common Features:**
+- Capture and replay HTTP(S) requests
+- Modify and intercept requests/responses
+- Web crawling, fuzzing, scanning
+- Request analysis and mapping
 
 ---
 
-## 💻 Web Applications vs Native Applications
+## 🛠️ Popular Web Proxy Tools
 
-| Aspect      | Web Applications            | Native Applications                |
-|-------------|-----------------------------|------------------------------------|
-| Installation| Not required (runs in browser)| Required                           |
-| Platform    | OS independent              | OS dependent                       |
-| Updates     | Immediate from central server| Individual user updates required   |
-| Speed       | Comparatively slower        | Faster (deep OS integration)       |
+### 1. Burp Suite
+- GUI-friendly and widely used
+- Available in Community (free) and Pro (paid) editions
+- Community version includes most core features
+- Built-in Chromium browser for testing
 
----
-
-## 🛠️ Components of a Web Application
-
-### 1. Front-End
-
-- **HTML:** Defines webpage structure 📄
-- **CSS:** Styling and layout 🎨
-- **JavaScript:** Handles dynamic functionality ⚙️
-
-### 2. Back-End
-
-- **Server:** Apache, NGINX, IIS 🌍
-- **Database:** MySQL, MongoDB 🗃️
-- **Framework:** Laravel, Django, Express 🚧
+### 2. OWASP ZAP (Zed Attack Proxy)
+- Free, open-source alternative to Burp
+- No feature restrictions
+- Ideal for community use or learning
 
 ---
 
-## 🔗 Web Application Architecture
+## 🧰 Setting Up Burp & ZAP
 
-Web applications are usually divided into three layers:
+Both tools run on Windows, macOS, and Linux, and are pre-installed in Kali/Parrot or HTB PwnBox.
 
-| Layer                   | Description                                 |
-|-------------------------|---------------------------------------------|
-| Presentation Layer 🎯    | Interaction with users (UI/UX)              |
-| Application Layer 🚦     | Handles requests and business logic         |
-| Data Layer 📊            | Manages data storage (connected to DB)      |
+**Launch Burp:**
+```bash
+java -jar burpsuite.jar
+```
 
----
-
-## 🚧 Common Web Application Vulnerabilities
-
-| Vulnerability                | Description                               |
-|------------------------------|-------------------------------------------|
-| Authentication Bypass 🔑      | Unauthorized access through authentication bypass|
-| File Upload Vulnerabilities 📂| Allows unvalidated file uploads          |
-| Command Injection 💣          | Executes OS commands from unvalidated user inputs|
-| SQL Injection 🛠️              | Executes SQL commands from unvalidated user inputs|
+**Launch ZAP:**
+```bash
+java -jar zaproxy.jar
+```
 
 ---
 
-## 📍 Front-End Security Vulnerabilities
+## 🌐 Proxy Configuration
 
-| Vulnerability                   | Description                             |
-|---------------------------------|-----------------------------------------|
-| Sensitive Data Exposure 🔓       | Exposes passwords, API keys in source code|
-| HTML Injection 📛                | Executes HTML code without filtering input|
-| Cross-Site Scripting (XSS) 🚨    | Executes user input as JavaScript        |
-| Cross-Site Request Forgery (CSRF)🌊| Performs requests using authenticated user privileges|
+### 📦 Pre-configured Browsers
+- Burp: Proxy > Intercept > Open Browser
+- ZAP: Top-right Firefox icon
 
----
-
-## 🗃️ Database Types
-
-### Relational Databases (SQL)
-- MySQL, MSSQL, Oracle
-- Efficient management of structured data
-
-### Non-relational Databases (NoSQL)
-- MongoDB, Redis, Cassandra
-- Handles unstructured data and rapid scalability
+### 🦊 Using Firefox + FoxyProxy
+1. Add `127.0.0.1` and port `8080`
+2. Install Burp/ZAP CA certificates
+3. Enable proxy through the extension
 
 ---
 
-## 🌐 API Types
+## ✋ Intercepting Web Requests
 
-| API Type | Description                                  |
-|----------|----------------------------------------------|
-| REST 🛣️ | Data transmission via URL and HTTP methods (typically JSON)|
-| SOAP 📦  | XML-based data transmission; suitable for complex data handling|
+### Burp
+- Enable at Proxy > Intercept > Intercept is on
+- Forward/Drop requests manually
 
----
-
-## ⚠️ CVSS (Common Vulnerability Scoring System)
-
-| Severity         | CVSS Score (v3) |
-|------------------|-----------------|
-| Low 🟢            | 0.1-3.9         |
-| Medium 🟡         | 4.0-6.9         |
-| High 🔴           | 7.0-8.9         |
-| Critical 🔥       | 9.0-10.0        |
+### ZAP
+- Toggle interception [CTRL+B]
+- Use HUD for in-browser control
 
 ---
 
-## 📚 Next Steps
+## 🧪 Modifying Requests/Responses
 
-Deepen your understanding through practical exercises:
-
-1. Install a web server on a VM 💻
-2. Create an HTML page 📄
-3. Style it using CSS 🎨
-4. Add JavaScript functionality ⚙️
-5. Build a simple web app 🚀
-6. Connect it to a database 🗃️
-7. Experiment with APIs 🛠️
-8. Test and remediate vulnerabilities 🔧
-
-**Recommended next modules:**
-
-- OWASP Top 10 📖
-- SQL Injection Practice 🛠️
-- HackTheBox Easy Boxes 🔍
+- Test for SQLi, XSS, Command Injection, etc.
+- Change parameters, headers, or body
+- Automate changes with “Match & Replace” (Burp) or “Replacer” (ZAP)
 
 ---
 
-## 🚀 References
+## 🔁 Repeating Requests
 
-- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
-- [HackTheBox](https://www.hackthebox.eu/)
+### Burp Repeater
+- Right-click > Send to Repeater
+- Modify and resend requests
+
+### ZAP Request Editor
+- Right-click > Resend
+- Modify and view live responses
 
 ---
 
-✅ **Conclusion:**
-Continuous learning and practice are essential for mastering web application security. Use this guide as your foundation and apply it practically to enhance your skills! 🛡️🎯
+## 🔐 Encoding & Decoding
+
+Supported encodings:
+- URL, Base64, HTML, Hex, Unicode
+
+### Tools:
+- Burp: Decoder tab or Inspector
+- ZAP: Encoder/Decoder/Hash ([CTRL+E])
+
+---
+
+## ⚙️ Proxying Other Tools
+
+### proxychains (Linux)
+```bash
+sudo nano /etc/proxychains.conf
+# Add:
+http 127.0.0.1 8080
+```
+
+### Tools:
+- `curl`, `nmap --proxies`, Metasploit `set PROXIES`
+
+---
+
+## 🚀 Burp Intruder & ZAP Fuzzer
+
+### Burp Intruder
+- Brute-force, fuzz directories, inject parameters
+- Free version is throttled (1 req/sec)
+
+### ZAP Fuzzer
+- Unlimited speed
+- Built-in wordlists via Marketplace
+
+---
+
+## 🔍 Web Scanners
+
+### Burp Scanner (Pro only)
+- Crawl and Audit for vulnerabilities
+- Passive and Active scanning
+- Generates comprehensive reports
+
+### ZAP Scanner
+- Spider for site map generation
+- Passive + Active scanners
+- Export reports (HTML, XML, Markdown)
+
+---
+
+## 🧩 Extensions
+
+### Burp:
+- BApp Store (Extender tab)
+- Examples: J2EEScan, Retire.js, ActiveScan++
+
+### ZAP:
+- Marketplace (Manage Add-ons)
+- Examples: FuzzDB, OS Command Injection lists
+
+---
+
+## ✅ Final Thoughts
+
+Web Proxies like **Burp Suite** and **OWASP ZAP** are essential tools for penetration testers. Mastering their features enables efficient, deep analysis of web applications.
+
+> Practice on HTB Academy and HTB Labs to reinforce these skills!
+
